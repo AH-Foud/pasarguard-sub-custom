@@ -1,106 +1,54 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LANG_CODE="fa"
-VERSION="latest"
 DEST_DIR="/var/lib/pasarguard/templates/subscription"
 DEST_FILE="${DEST_DIR}/index.html"
 ENV_FILE="/opt/pasarguard/.env"
+REPO_URL="https://github.com/AH-Foud/pasarguard-sub-custom.git"
+TMP_DIR=$(mktemp -d)
 
-usage() {
-  cat <<'EOF'
-Usage: install.sh [--lang en|fa|zh|ru] [--version latest|<tag>]
+cleanup() { rm -rf "$TMP_DIR"; }
+trap cleanup EXIT
 
-Examples:
-  install.sh
-  install.sh --lang en
-  install.sh --lang fa --version v2.0.0
-EOF
-}
+echo "Cloning repository..."
+git clone "$REPO_URL" "$TMP_DIR"
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --lang)
-      if [[ $# -lt 2 ]]; then
-        echo "Error: --lang needs a value (en|fa|zh|ru)." >&2
-        exit 1
-      fi
-      LANG_CODE="$2"
-      shift 2
-      ;;
-    --version)
-      if [[ $# -lt 2 ]]; then
-        echo "Error: --version needs a value (latest|<tag>)." >&2
-        exit 1
-      fi
-      VERSION="$2"
-      shift 2
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "Error: unknown argument: $1" >&2
-      usage
-      exit 1
-      ;;
-  esac
-done
+cd "$TMP_DIR"
 
-case "${LANG_CODE}" in
-  en|fa|zh|ru) ;;
-  *)
-    echo "Error: invalid language '${LANG_CODE}'. Use one of: en, fa, zh, ru." >&2
-    exit 1
-    ;;
-esac
-
-if [[ -z "${VERSION}" ]]; then
-  echo "Error: version cannot be empty. Use 'latest' or a release tag like 'v2.0.0'." >&2
-  exit 1
+if ! command -v bun >/dev/null 2>&1; then
+  echo "Installing bun..."
+  curl -fsSL https://bun.sh/install | bash
+  export PATH="$HOME/.bun/bin:$PATH"
 fi
 
-RELEASE_PATH="latest/download"
-if [[ "${VERSION}" != "latest" ]]; then
-  RELEASE_PATH="download/${VERSION}"
-fi
+echo "Installing dependencies..."
+bun install
 
-URL="https://github.com/PasarGuard/subscription-template/releases/${RELEASE_PATH}/${LANG_CODE}.html"
-if [[ "${LANG_CODE}" == "fa" ]]; then
-  URL="https://github.com/PasarGuard/subscription-template/releases/${RELEASE_PATH}/index.html"
-fi
+echo "Building..."
+bun run build
 
-mkdir -p "${DEST_DIR}"
+mkdir -p "$DEST_DIR"
+cp dist/index.html "$DEST_FILE"
 
-if command -v wget >/dev/null 2>&1; then
-  wget -q -O "${DEST_FILE}" "${URL}"
-elif command -v curl >/dev/null 2>&1; then
-  curl -fsSL "${URL}" -o "${DEST_FILE}"
+mkdir -p "$(dirname "$ENV_FILE")"
+touch "$ENV_FILE"
+
+if grep -q '^CUSTOM_TEMPLATES_DIRECTORY=' "$ENV_FILE"; then
+  sed -i 's|^CUSTOM_TEMPLATES_DIRECTORY=.*|CUSTOM_TEMPLATES_DIRECTORY="/var/lib/pasarguard/templates/"|' "$ENV_FILE"
 else
-  echo "Error: neither wget nor curl is installed." >&2
-  exit 1
+  echo 'CUSTOM_TEMPLATES_DIRECTORY="/var/lib/pasarguard/templates/"' >> "$ENV_FILE"
 fi
 
-mkdir -p "$(dirname "${ENV_FILE}")"
-touch "${ENV_FILE}"
-
-if grep -q '^CUSTOM_TEMPLATES_DIRECTORY=' "${ENV_FILE}"; then
-  sed -i 's|^CUSTOM_TEMPLATES_DIRECTORY=.*|CUSTOM_TEMPLATES_DIRECTORY="/var/lib/pasarguard/templates/"|' "${ENV_FILE}"
+if grep -q '^SUBSCRIPTION_PAGE_TEMPLATE=' "$ENV_FILE"; then
+  sed -i 's|^SUBSCRIPTION_PAGE_TEMPLATE=.*|SUBSCRIPTION_PAGE_TEMPLATE="subscription/index.html"|' "$ENV_FILE"
 else
-  echo 'CUSTOM_TEMPLATES_DIRECTORY="/var/lib/pasarguard/templates/"' >> "${ENV_FILE}"
-fi
-
-if grep -q '^SUBSCRIPTION_PAGE_TEMPLATE=' "${ENV_FILE}"; then
-  sed -i 's|^SUBSCRIPTION_PAGE_TEMPLATE=.*|SUBSCRIPTION_PAGE_TEMPLATE="subscription/index.html"|' "${ENV_FILE}"
-else
-  echo 'SUBSCRIPTION_PAGE_TEMPLATE="subscription/index.html"' >> "${ENV_FILE}"
+  echo 'SUBSCRIPTION_PAGE_TEMPLATE="subscription/index.html"' >> "$ENV_FILE"
 fi
 
 if command -v pasarguard >/dev/null 2>&1; then
   pasarguard restart
-  echo "Installed template (${LANG_CODE}, ${VERSION}) and restarted PasarGuard."
+  echo "Done! Template installed and PasarGuard restarted."
 else
-  echo "Installed template (${LANG_CODE}, ${VERSION}) at ${DEST_FILE}."
-  echo "pasarguard command not found, restart service manually."
+  echo "Done! Template installed at $DEST_FILE"
+  echo "Restart your panel manually."
 fi
