@@ -16,7 +16,8 @@ git clone "$REPO_URL" "$TMP_DIR"
 cd "$TMP_DIR"
 
 if ! command -v bun >/dev/null 2>&1; then
-  echo "Installing bun..."
+  echo "Installing unzip & bun..."
+  apt-get update -qq && apt-get install -y -qq unzip
   curl -fsSL https://bun.sh/install | bash
   export PATH="$HOME/.bun/bin:$PATH"
 fi
@@ -47,7 +48,7 @@ fi
 
 if command -v pasarguard >/dev/null 2>&1; then
   pasarguard restart
-  echo "Done! Template installed and PasarGuard restarted."
+  echo "Done! Template installed and panel restarted."
 else
   echo "Done! Template installed at $DEST_FILE"
   echo "Restart your panel manually."
